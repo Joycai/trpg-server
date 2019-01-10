@@ -21,12 +21,13 @@ class BaseDataServiceImpl(
     private val scMap = mutableMapOf<String, SkillDto>()
     private val driveMap = mutableMapOf<String, SkillDto>()
     private val surviveMap = mutableMapOf<String, SkillDto>()
-    private val baseMap = mutableMapOf<String, SkillDto>()
+    private val lanMap = mutableMapOf<String, SkillDto>()
 
+    private val baseMap = mutableMapOf<String, SkillDto>()
     private val fightMap = mutableMapOf<String, SkillDto>()
     private val shootMap = mutableMapOf<String, SkillDto>()
 
-    private val jobListMap = mutableMapOf<String,JobDto>();
+    private val jobListMap = mutableMapOf<String, JobDto>();
 
     init {
         val fio = FileInputStream(File("excels/数据集.xlsx"))
@@ -83,15 +84,22 @@ class BaseDataServiceImpl(
             shootList.forEach { shootMap["${it.code}"] = it }
         }
 
+        //语言
+        val lanList = readSheet(reader, 0, 8, sheetHeader, SkillDto::class.java)
+        if (lanList.isNotEmpty()) {
+            lanList.forEach { lanMap["${it.code}"] = it }
+        }
+
         //读取职业列表
         val jobHeader = arrayOf<String?>("code", "name", "creditRange", "mainAttr", "jobSkillStr", "skillMsg")
         val jobList = readSheet(reader, 0, 0, jobHeader, ExcelJob::class.java)
 
-        if( jobList.isNotEmpty()){
+        if (jobList.isNotEmpty()) {
             jobList.forEach {
                 jobListMap[it.code!!] = it.convert()
             }
         }
+        reader.close()
     }
 
     fun <T> readSheet(reader: ExcelReader, startRow: Int, sheetIdx: Int, headerMapper: Array<String?>, clazz: Class<T>): List<T> {
@@ -107,26 +115,28 @@ class BaseDataServiceImpl(
     }
 
     fun ExcelJob.convert(): JobDto {
+
         //信誉
-        val credArray = if(this.creditRange.isNullOrBlank()){
-            arrayOf(0,99)
-        }else{
+        val credArray = if (this.creditRange.isNullOrBlank()) {
+            arrayOf(0, 99)
+        } else {
             val str = this.creditRange?.split("-")!!
-            arrayOf(str[0].toInt(),str[1].toInt())
+            arrayOf(str[0].toInt(), str[1].toInt())
         }
+
         //主要属性
-        val mainAttr = if(this.mainAttr.isNullOrBlank()){
+        val mainAttr = if (this.mainAttr.isNullOrBlank()) {
             listOf<Int>()
-        }else{
-            if (this.mainAttr!!.contains(",")){
-                val ta =this.mainAttr!!.split(",")
+        } else {
+            if (this.mainAttr!!.contains(",")) {
+                val ta = this.mainAttr!!.split(",")
                 ta.map { it.toInt() }
-            }else{
+            } else {
                 listOf(this.mainAttr!!.toInt())
             }
         }
 
-        val skillMap = processSkillStr(this.jobSkillStr)
+        val skillMap = processRawSkillStr(this.jobSkillStr)
 
         return JobDto(
                 code = this.code,
@@ -149,17 +159,94 @@ class BaseDataServiceImpl(
      * "exNum" 自由技能
      * "group" n选m List<CustomJobGroup>
      */
-    fun processSkillStr(jobSkillStr: String?): Map<String, Any> {
+    private fun processRawSkillStr(jobSkillStr: String?): Map<String, Any> {
+        val complexReg = "^[1-9]x（[\\S\\s]+）\$".toRegex()
 
-        if(jobSkillStr.isNullOrBlank()){
+        /**
+         * 任意专精
+         */
+        val proSkillReg = "^([1-9]x)?((格斗)|(技艺)|(射击)|(生存)|(科学)|(外语)|(驾驶))A?\$".toRegex()
+        val proSkillReg2 = "^([1-9]x)?((格斗)|(技艺)|(射击)|(生存)|(科学)|(外语)|(驾驶))（(E[\\S\\s]+）)\$".toRegex()
+
+        val result = mutableMapOf<String, Any>()
+        val baseArr = mutableListOf<String>()
+
+        if (jobSkillStr.isNullOrBlank()) {
             return mapOf()
-        }else{
-            //拆分成描述字符串
-            val descStr = jobSkillStr.split("，")
+        } else {
+            //拆分描述单词
+            val descWords = jobSkillStr.split("，")
 
+            for (word in descWords) {
+                if (word == null) {
+                    println("NULL word")
+                } else if (word.startsWith("EX")) {
+                    //自由点数
+                    result["extNum"] = word.substring(2).toInt()
+
+                } else if (complexReg.matches(word)) {
+                    //标准格式nx(aaa、bbb、ccc)
+                } else if (proSkillReg.matches(word)) {
+                    //专精n选1
+                    println("专精配置 $word")
+                } else if (proSkillReg2.matches(word)) {
+                    println("专精配置(补集) $word")
+                } else {
+                    val code = findSkillCodeByName(word)
+                    if (code == null) {
+                        //未知词
+                        println("UNKNOW: $word")
+                    } else {
+                        //正常
+                        baseArr.add(code)
+                    }
+                }
+
+            }
+            result["base"] = baseArr
+            return result
         }
 
         return mapOf()
+    }
+
+
+    /**
+     * 按照名称寻找对应的代码（单个技能）
+     */
+    private fun findSkillCodeByName(name: String): String? {
+        val proSkillReg = "^((格斗)|(技艺)|(射击)|(生存)|(科学)|(外语)|(驾驶))（[\\S\\s]+）\$".toRegex()
+
+        baseMap.values.forEach {
+            if (it.name == name) {
+                return it.code
+            }
+        }
+        if (proSkillReg.matches(name)) {
+            //是专精技能
+            val catName = name.substring(0, 2)
+            val proName = name.substring(name.indexOf("（") + 1, name.lastIndexOf("）"))
+
+            val collection = when (catName) {
+                "格斗" -> fightMap.values
+                "技艺" -> artMap.values
+                "射击" -> shootMap.values
+                "生存" -> surviveMap.values
+                "科学" -> scMap.values
+                "外语" -> lanMap.values
+                "驾驶" -> driveMap.values
+                else -> {
+                    arrayListOf()
+                }
+            }
+            collection.forEach {
+                if (it.name!!.contains(proName)) {
+                    return it.code
+                }
+            }
+        }
+
+        return null
     }
 
     override fun listAllSkill(): Any {
@@ -174,7 +261,7 @@ class BaseDataServiceImpl(
         )
     }
 
-    override fun listAllJob(): Any{
+    override fun listAllJob(): Any {
         return mapOf("joblist" to jobListMap)
     }
 }
