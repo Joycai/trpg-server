@@ -186,11 +186,12 @@ class BaseDataServiceImpl(
 
                 } else if (complexReg.matches(word)) {
                     //标准格式nx(aaa、bbb、ccc)
+                    println("标准格式 $word")
                 } else if (proSkillReg.matches(word)) {
                     //专精n选1
-                    println("专精配置 $word")
+//                    println("专精配置 $word")
                 } else if (proSkillReg2.matches(word)) {
-                    println("专精配置(补集) $word")
+//                    println("专精配置(补集) $word")
                 } else {
                     val code = findSkillCodeByName(word)
                     if (code == null) {
@@ -257,7 +258,8 @@ class BaseDataServiceImpl(
                 "science" to scMap,
                 "survive" to surviveMap,
                 "craft" to artMap,
-                "drive" to driveMap
+                "drive" to driveMap,
+                "lang" to lanMap
         )
     }
 
